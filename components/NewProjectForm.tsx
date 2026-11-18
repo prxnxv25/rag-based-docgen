@@ -26,12 +26,26 @@ export function NewProjectForm() {
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [templateError, setTemplateError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/templates")
-      .then((r) => (r.ok ? r.json() : { templates: [] }))
-      .then((d) => setSaved(d.templates ?? []))
-      .catch(() => setSaved([]));
+    let cancelled = false;
+    async function loadTemplates() {
+      try {
+        const res = await fetch("/api/templates");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Could not load saved templates.");
+        if (!cancelled) setSaved(data.templates ?? []);
+      } catch (e) {
+        if (!cancelled) {
+          setTemplateError(e instanceof Error ? e.message : "Could not load saved templates.");
+        }
+      }
+    }
+    void loadTemplates();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -102,6 +116,11 @@ export function NewProjectForm() {
       {/* Templates */}
       <section className="card space-y-4 p-5">
         <h2 className="font-medium text-slate-900">2. Document templates</h2>
+        {templateError && (
+          <p role="alert" className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {templateError}
+          </p>
+        )}
         <fieldset className="space-y-2 text-sm">
           <legend className="mb-1 font-medium text-slate-700">
             Do you have your own FSD, TSD or SPD templates?

@@ -134,15 +134,18 @@ export function Workspace(props: Props) {
     }
   }
 
-  async function persistAnswers(next: Record<string, string>) {
+  async function persistAnswers(next: Record<string, string>): Promise<boolean> {
     try {
-      await fetch(`/api/projects/${project.id}`, {
+      const res = await fetch(`/api/projects/${project.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ answers: next }),
       });
-    } catch {
-      /* answers are re-sent on the next blur */
+      if (!res.ok) throw new Error(await errorFrom(res, "Could not save your answers"));
+      return true;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save your answers.");
+      return false;
     }
   }
 
@@ -166,14 +169,51 @@ export function Workspace(props: Props) {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let text = "";
+    let pending = "";
+    let completed = false;
+
+    function processEvent(line: string) {
+      if (!line.trim()) return;
+      const event: unknown = JSON.parse(line);
+      if (typeof event !== "object" || event === null || !("type" in event)) {
+        throw new Error("The server returned an invalid generation event.");
+      }
+
+      if (event.type === "reset") {
+        text = "";
+        setSectionContent(type, index, text);
+      } else if (event.type === "delta") {
+        if (!("text" in event) || typeof event.text !== "string") {
+          throw new Error("The server returned an invalid text update.");
+        }
+        text += event.text;
+        setSectionContent(type, index, text);
+      } else if (event.type === "done") {
+        completed = true;
+      } else if (event.type === "error") {
+        const message = "text" in event && typeof event.text === "string" ? event.text : "";
+        throw new Error(message || "Section generation failed.");
+      } else {
+        throw new Error("The server returned an unknown generation event.");
+      }
+    }
+
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      text += decoder.decode(value, { stream: true });
-      setSectionContent(type, index, text);
+      pending += decoder.decode(value, { stream: true });
+      const lines = pending.split("\n");
+      pending = lines.pop() ?? "";
+      for (const line of lines) processEvent(line);
     }
-    text = (text + decoder.decode()).trim();
+    pending += decoder.decode();
+    processEvent(pending);
+    if (!completed) throw new Error("The generation stream ended unexpectedly.");
+    text = text.trim();
     if (!text) throw new Error("The model returned an empty section. Please retry.");
+    if (!analysis?.requirements.some((requirement) => text.includes(`[${requirement.id}]`))) {
+      throw new Error("This section did not cite a known requirement ID. Please regenerate it.");
+    }
     setSectionContent(type, index, text);
     return text;
   }
@@ -252,6 +292,7 @@ export function Workspace(props: Props) {
   async function runGeneration(types: DocType[], onlyMissing: boolean) {
     if (!analysis) return;
     setError(null);
+    if (!(await persistAnswers(answers))) return;
     const controller = new AbortController();
     abortRef.current = controller;
     try {
@@ -288,6 +329,7 @@ export function Workspace(props: Props) {
 
   async function regenerateSection(type: DocType, index: number) {
     setError(null);
+    if (!(await persistAnswers(answers))) return;
     const controller = new AbortController();
     abortRef.current = controller;
     const current = docsRef.current[type].sections;
@@ -347,11 +389,11 @@ export function Workspace(props: Props) {
     if (versions[type]) return;
     try {
       const res = await fetch(`/api/projects/${project.id}/documents/${type}`);
-      if (!res.ok) return;
+      if (!res.ok) throw new Error(await errorFrom(res, "Could not load version history"));
       const data = await res.json();
       setVersions((v) => ({ ...v, [type]: data.versions }));
-    } catch {
-      /* history is optional */
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load version history.");
     }
   }
 

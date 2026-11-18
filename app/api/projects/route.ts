@@ -13,7 +13,7 @@ import {
 import { DEFAULT_OUTLINES } from "@/lib/templates/defaults";
 import { DOC_TYPES, LIMITS, type DocType, type Outline } from "@/lib/types";
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 export const GET = handle(async () => {
   const userId = await requireUser();
@@ -106,20 +106,16 @@ export const POST = handle(async (req: Request) => {
           throw new HttpError(400, `The ${docType.toUpperCase()} template appears to be empty.`);
         }
         await recordUsage(userId, "template");
-        const raw = await callTool({
+        const sections = await callTool({
           system: TEMPLATE_SYSTEM,
           user: templateUserPrompt(docType, text),
           toolName: "record_template",
           toolDescription: "Record the ordered section outline of the template.",
           schema: TEMPLATE_TOOL_SCHEMA,
-          maxTokens: 8000,
+          parse: parseTemplateSections,
+          maxTokens: 10000,
+          onRetry: () => recordUsage(userId, "template-retry"),
         });
-        let sections;
-        try {
-          sections = parseTemplateSections(raw);
-        } catch (e) {
-          throw new HttpError(422, (e as Error).message);
-        }
         await db.insert(schema.templates).values({
           userId,
           name: file.name,

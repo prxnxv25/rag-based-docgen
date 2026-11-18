@@ -16,7 +16,7 @@ export interface TraceResult {
   coverage: Record<DocType, { covered: number; total: number }>;
 }
 
-const ID_PATTERN = /\b(?:FR|NFR|CON|REQ|BR|UC|US|[A-Z]{2,5})-\d{1,4}\b/g;
+const ID_PATTERN = /\[([A-Z]{2,5}-\d{1,4})\]/g;
 
 function escapeRegExp(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -34,7 +34,7 @@ export function buildTrace(
 
   const rows: TraceRow[] = analysis.requirements.map((r) => {
     const refs = { fsd: [], tsd: [], spd: [] } as Record<DocType, string[]>;
-    const re = new RegExp(`(?<![A-Za-z0-9-])${escapeRegExp(r.id)}(?![A-Za-z0-9-])`);
+    const re = new RegExp(`\\[${escapeRegExp(r.id)}\\]`);
     for (const t of DOC_TYPES) {
       for (const s of docs[t] ?? []) {
         if (re.test(s.content)) refs[t].push(s.title);
@@ -44,12 +44,12 @@ export function buildTrace(
   });
 
   const unknownRefs = { fsd: [], tsd: [], spd: [] } as Record<DocType, string[]>;
-  const prefixes = new Set(analysis.requirements.map((r) => r.id.split("-")[0]));
   for (const t of DOC_TYPES) {
     const seen = new Set<string>();
     for (const s of docs[t] ?? []) {
-      for (const m of s.content.match(ID_PATTERN) ?? []) {
-        if (prefixes.has(m.split("-")[0]) && !known.has(m)) seen.add(m);
+      for (const match of s.content.matchAll(ID_PATTERN)) {
+        const id = match[1];
+        if (id && !known.has(id)) seen.add(id);
       }
     }
     unknownRefs[t] = [...seen].sort();

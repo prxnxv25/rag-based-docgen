@@ -5,7 +5,7 @@ import { SECTION_SYSTEM, sectionUserPrompt } from "@/lib/prompts";
 import { DOC_TYPES } from "@/lib/types";
 
 // One section per request keeps every call well inside the function time limit.
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -44,12 +44,13 @@ export const POST = handle(async (req: Request, { params }: Ctx) => {
       sectionIndex,
       prior,
     }),
-    maxTokens: 6000,
+    maxTokens: 20000,
+    onRetry: () => recordUsage(userId, "section-retry"),
   });
 
   return new Response(stream, {
     headers: {
-      "Content-Type": "text/plain; charset=utf-8",
+      "Content-Type": "application/x-ndjson; charset=utf-8",
       "Cache-Control": "no-store, no-transform",
       "X-Accel-Buffering": "no",
     },

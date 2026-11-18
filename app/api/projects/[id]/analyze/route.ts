@@ -10,7 +10,7 @@ import {
   normaliseAnalysis,
 } from "@/lib/prompts";
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -20,16 +20,17 @@ export const POST = handle(async (_req: Request, { params }: Ctx) => {
   const project = await getOwnedProject(id, userId);
 
   await recordUsage(userId, "analyze");
-  const raw = await callTool({
+  const analysis = await callTool({
     system: ANALYSIS_SYSTEM,
     user: analysisUserPrompt(project.brdText),
     toolName: "record_analysis",
     toolDescription: "Record the structured analysis of the BRD.",
     schema: ANALYSIS_TOOL_SCHEMA,
-    maxTokens: 12000,
+    parse: normaliseAnalysis,
+    maxTokens: 16000,
+    onRetry: () => recordUsage(userId, "analyze-retry"),
   });
 
-  const analysis = normaliseAnalysis(raw);
   if (analysis.requirements.length === 0) {
     throw new HttpError(
       422,

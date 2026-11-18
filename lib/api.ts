@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb, schema } from "@/lib/db";
 
@@ -36,25 +36,38 @@ export function handle<A extends unknown[]>(
   };
 }
 
-const DAILY_LIMIT = Number(process.env.DAILY_GENERATION_LIMIT ?? 300);
+const configuredDailyLimit = Number(process.env.DAILY_GENERATION_LIMIT ?? 300);
+const DAILY_LIMIT =
+  Number.isSafeInteger(configuredDailyLimit) && configuredDailyLimit > 0
+    ? configuredDailyLimit
+    : 300;
 
 /** Cost control: counts LLM calls per user in the last 24 hours. */
 export async function recordUsage(userId: string, kind: string) {
   const db = getDb();
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const [row] = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(schema.usageEvents)
-    .where(
-      and(eq(schema.usageEvents.userId, userId), gte(schema.usageEvents.createdAt, since)),
-    );
-  if ((row?.n ?? 0) >= DAILY_LIMIT) {
+  const result = await db.execute(sql`
+    WITH user_lock AS MATERIALIZED (
+      SELECT pg_advisory_xact_lock(hashtextextended(${userId}, 0))
+    ),
+    recent_usage AS MATERIALIZED (
+      SELECT count(*)::int AS count
+      FROM usage_events, user_lock
+      WHERE user_id = ${userId}::uuid
+        AND created_at >= ${since}
+    )
+    INSERT INTO usage_events (user_id, kind)
+    SELECT ${userId}::uuid, ${kind}
+    FROM recent_usage
+    WHERE recent_usage.count < ${DAILY_LIMIT}
+    RETURNING id
+  `);
+  if (result.rows.length === 0) {
     throw new HttpError(
       429,
       `Daily generation limit (${DAILY_LIMIT}) reached. Try again tomorrow.`,
     );
   }
-  await db.insert(schema.usageEvents).values({ userId, kind });
 }
 
 export async function getOwnedProject(projectId: string, userId: string) {
