@@ -1,4 +1,4 @@
-# BRD Document Generator
+# rag-based-docgen
 
 Upload a Business Requirements Document (BRD) and generate an **FSD**, **TSD** and **SPD (Solution Proposal Document)**, written to your own template or to a default industry structure.
 
